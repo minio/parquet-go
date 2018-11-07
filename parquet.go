@@ -18,6 +18,7 @@ package parquet
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"io"
 
 	"git.apache.org/thrift.git/lib/go/thrift"
@@ -73,6 +74,11 @@ func fileMetadata(getReaderFunc GetReaderFunc) (*parquet.FileMetaData, error) {
 type Value struct {
 	Value interface{}
 	Type  parquet.Type
+}
+
+// MarshalJSON - encodes to JSON data
+func (value Value) MarshalJSON() (data []byte, err error) {
+	return json.Marshal(value.Value)
 }
 
 // File - denotes parquet file.
