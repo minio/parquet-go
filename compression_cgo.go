@@ -1,3 +1,5 @@
+// +build cgo
+
 /*
  * Minio Cloud Storage, (C) 2018 Minio, Inc.
  *
