@@ -22,12 +22,10 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/DataDog/zstd"
 	"github.com/golang/snappy"
 	"github.com/minio/parquet-go/gen-go/parquet"
 	"github.com/pierrec/lz4"
 	lzo "github.com/rasky/go-lzo"
-	brotli "gopkg.in/kothar/brotli-go.v0/dec"
 )
 
 type compressionCodec parquet.CompressionCodec
@@ -51,16 +49,8 @@ func (c compressionCodec) uncompress(buf []byte) ([]byte, error) {
 	case parquet.CompressionCodec_LZO:
 		return lzo.Decompress1X(bytes.NewReader(buf), len(buf), 0)
 
-	case parquet.CompressionCodec_BROTLI:
-		return brotli.DecompressBuffer(buf, make([]byte, 0))
-
 	case parquet.CompressionCodec_LZ4:
 		return ioutil.ReadAll(lz4.NewReader(bytes.NewReader(buf)))
-
-	case parquet.CompressionCodec_ZSTD:
-		rc := zstd.NewReader(bytes.NewReader(buf))
-		defer rc.Close()
-		return ioutil.ReadAll(rc)
 	}
 
 	return nil, fmt.Errorf("invalid compression codec %v", c)
