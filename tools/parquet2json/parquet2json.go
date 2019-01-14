@@ -76,7 +76,7 @@ func main() {
 		jsonFilename = strings.TrimSuffix(name, ext) + ".json"
 	}
 
-	columns := set.CreateStringSet(os.Args[1:]...)
+	columns := set.CreateStringSet(os.Args[2:]...)
 	if len(columns) == 0 {
 		columns = nil
 	}
