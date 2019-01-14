@@ -72,6 +72,7 @@ func fileMetadata(getReaderFunc GetReaderFunc) (*parquet.FileMetaData, error) {
 
 // Value - denotes column value
 type Value struct {
+	Name  string `json:"-"`
 	Value interface{}
 	Type  parquet.Type
 }
@@ -89,7 +90,7 @@ type File struct {
 	rowGroupIndex  int
 
 	columnNames set.StringSet
-	columns     map[string]*column
+	columns     []*column
 	rowIndex    int64
 }
 
@@ -109,7 +110,7 @@ func Open(getReaderFunc GetReaderFunc, columnNames set.StringSet) (*File, error)
 }
 
 // Read - reads single record.
-func (file *File) Read() (record map[string]Value, err error) {
+func (file *File) Read() (record []Value, err error) {
 	if file.rowGroupIndex >= len(file.rowGroups) {
 		return nil, io.EOF
 	}
@@ -134,10 +135,9 @@ func (file *File) Read() (record map[string]Value, err error) {
 		return file.Read()
 	}
 
-	record = make(map[string]Value)
-	for name := range file.columns {
-		value, valueType := file.columns[name].read()
-		record[name] = Value{value, valueType}
+	for i, c := range file.columns {
+		value, valueType := file.columns[i].read()
+		record = append(record, Value{c.name, value, valueType})
 	}
 
 	file.rowIndex++

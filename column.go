@@ -30,7 +30,7 @@ func getColumns(
 	columnNames set.StringSet,
 	schemaElements []*parquet.SchemaElement,
 	getReaderFunc GetReaderFunc,
-) (nameColumnMap map[string]*column, err error) {
+) (nameColumns []*column, err error) {
 	nameIndexMap := make(map[string]int)
 	for colIndex, columnChunk := range rowGroup.GetColumns() {
 		meta := columnChunk.GetMetaData()
@@ -58,29 +58,25 @@ func getColumns(
 
 		thriftReader := thrift.NewTBufferedTransport(thrift.NewStreamTransportR(rc), int(size))
 
-		if nameColumnMap == nil {
-			nameColumnMap = make(map[string]*column)
-		}
-
-		nameColumnMap[columnName] = &column{
+		nameColumns = append(nameColumns, &column{
 			name:           columnName,
 			metadata:       meta,
 			schemaElements: schemaElements,
 			rc:             rc,
 			thriftReader:   thriftReader,
 			valueType:      meta.GetType(),
-		}
+		})
 
 		// First element of []*parquet.SchemaElement from parquet file metadata is 'schema'
 		// which is always skipped, hence colIndex + 1 is valid.
 		nameIndexMap[columnName] = colIndex + 1
 	}
 
-	for name := range nameColumnMap {
-		nameColumnMap[name].nameIndexMap = nameIndexMap
+	for i := range nameColumns {
+		nameColumns[i].nameIndexMap = nameIndexMap
 	}
 
-	return nameColumnMap, nil
+	return nameColumns, nil
 }
 
 type column struct {
