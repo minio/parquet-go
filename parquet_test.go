@@ -17,7 +17,6 @@
 package parquet
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"testing"
@@ -59,6 +58,13 @@ func TestParquet(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	expectedRecords := []string{
+		`map[one:{-1 DOUBLE} three:{true BOOLEAN} two:{[102 111 111] BYTE_ARRAY}]`,
+		`map[one:{<nil> DOUBLE} three:{false BOOLEAN} two:{[98 97 114] BYTE_ARRAY}]`,
+		`map[one:{2.5 DOUBLE} three:{true BOOLEAN} two:{[98 97 122] BYTE_ARRAY}]`,
+	}
+
+	i := 0
 	for {
 		record, err := file.Read()
 		if err != nil {
@@ -69,7 +75,15 @@ func TestParquet(t *testing.T) {
 			break
 		}
 
-		fmt.Println(record)
+		if i == len(expectedRecords) {
+			t.Fatalf("read more than expected record count %v", len(expectedRecords))
+		}
+
+		if record.String() != expectedRecords[i] {
+			t.Fatalf("record%v: expected: %v, got: %v", i+1, expectedRecords[i], record.String())
+		}
+
+		i++
 	}
 
 	file.Close()
