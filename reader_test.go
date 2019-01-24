@@ -48,7 +48,7 @@ func getReader(name string, offset int64, length int64) (io.ReadCloser, error) {
 
 func TestParquet(t *testing.T) {
 	name := "example.parquet"
-	file, err := Open(
+	reader, err := NewReader(
 		func(offset, length int64) (io.ReadCloser, error) {
 			return getReader(name, offset, length)
 		},
@@ -66,7 +66,7 @@ func TestParquet(t *testing.T) {
 
 	i := 0
 	for {
-		record, err := file.Read()
+		record, err := reader.Read()
 		if err != nil {
 			if err != io.EOF {
 				t.Error(err)
@@ -86,5 +86,5 @@ func TestParquet(t *testing.T) {
 		i++
 	}
 
-	file.Close()
+	reader.Close()
 }

@@ -10,7 +10,7 @@ getdeps:
 
 vet:
 	@echo "Running $@"
-	@go tool vet -atomic -bool -copylocks -nilfunc -printf -shadow -rangeloops -unreachable -unsafeptr -unusedresult *.go
+	@go vet *.go
 
 fmt:
 	@echo "Running $@"
