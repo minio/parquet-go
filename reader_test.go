@@ -46,7 +46,7 @@ func getReader(name string, offset int64, length int64) (io.ReadCloser, error) {
 	return file, nil
 }
 
-func TestParquet(t *testing.T) {
+func TestReader(t *testing.T) {
 	name := "example.parquet"
 	reader, err := NewReader(
 		func(offset, length int64) (io.ReadCloser, error) {

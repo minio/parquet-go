@@ -100,11 +100,18 @@ func interfacesToValues(values []interface{}, valueType parquet.Type) interface{
 // sizeOf - get the size of a parquet value
 func sizeOf(value interface{}) (size int32) {
 	v := reflect.ValueOf(value)
-	if v.IsNil() {
-		return size
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		if v.IsNil() {
+			return size
+		}
 	}
 
-	v = v.Elem()
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface:
+		v = v.Elem()
+	}
+
 	switch v.Kind() {
 	case reflect.Bool:
 		size = 1

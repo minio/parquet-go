@@ -25,6 +25,7 @@ import (
 
 	"git.apache.org/thrift.git/lib/go/thrift"
 	"github.com/minio/parquet-go/gen-go/parquet"
+	"github.com/minio/parquet-go/schema"
 )
 
 const (
@@ -38,181 +39,138 @@ type Writer struct {
 	RowGroupSize    int64
 	CompressionType parquet.CompressionCodec
 
-	writeCloser    io.WriteCloser
-	size           int64
-	numRows        int64
-	offset         int64
-	pagesMapBuf    map[string][]*page
-	dictRecs       map[string]*dictRec
-	footer         *parquet.FileMetaData
-	schemaElements []*parquet.SchemaElement
-	rowGroupCount  int
-	records        []map[string]*Value
+	writeCloser   io.WriteCloser
+	numRows       int64
+	offset        int64
+	dictRecs      map[string]*dictRec
+	footer        *parquet.FileMetaData
+	schemaTree    *schema.Tree
+	valueElements []*schema.Element
+	columnDataMap map[string]*ColumnData
+	rowGroupCount int
 }
 
-func (writer *Writer) writeRecords() (err error) {
-	if len(writer.records) == 0 {
+func (writer *Writer) writeData() (err error) {
+	if writer.numRows == 0 {
 		return nil
 	}
 
-	tableMap := make(map[string]*table)
-	for _, schema := range writer.schemaElements {
-		if schema.GetNumChildren() != 0 {
+	rowGroup := newRowGroup()
+	rowGroup.RowGroupHeader.Columns = []*parquet.ColumnChunk{}
+
+	for _, element := range writer.valueElements {
+		name := element.PathInTree
+		columnData, found := writer.columnDataMap[name]
+		if !found {
 			continue
 		}
 
 		table := new(table)
-		table.Path = strings.Split(schema.Name, ".")
-		table.MaxDefinitionLevel = 0
-		table.MaxRepetitionLevel = 0
-		table.RepetitionType = schema.GetRepetitionType()
-		table.Type = schema.GetType()
+		table.Path = strings.Split(element.PathInSchema, ".")
+		table.MaxDefinitionLevel = int32(element.MaxDefinitionLevel)
+		table.MaxRepetitionLevel = int32(element.MaxRepetitionLevel)
+		table.RepetitionType = *element.RepetitionType
+		table.Type = *element.Type
 		table.ConvertedType = -1
-
-		for _, record := range writer.records {
-			value := record[schema.Name]
-			if *schema.Type != value.Type {
-				return fmt.Errorf("schema.Type and value.Type are not same")
-			}
-
-			switch value.Type {
-			case parquet.Type_BOOLEAN:
-				table.Values = append(table.Values, value.Value.(bool))
-			case parquet.Type_INT32:
-				table.Values = append(table.Values, value.Value.(int32))
-			case parquet.Type_INT64:
-				table.Values = append(table.Values, value.Value.(int64))
-			case parquet.Type_INT96, parquet.Type_BYTE_ARRAY, parquet.Type_FIXED_LEN_BYTE_ARRAY:
-				table.Values = append(table.Values, value.Value.([]byte))
-			case parquet.Type_FLOAT:
-				table.Values = append(table.Values, value.Value.(float32))
-			case parquet.Type_DOUBLE:
-				table.Values = append(table.Values, value.Value.(float64))
-			default:
-				return fmt.Errorf("unknown parquet type %v", value.Type)
-			}
-
-			table.DefinitionLevels = append(table.DefinitionLevels, 0)
-			table.RepetitionLevels = append(table.RepetitionLevels, 0)
+		if element.ConvertedType != nil {
+			table.ConvertedType = *element.ConvertedType
 		}
+		table.Values = valuesToInterfaces(columnData.values, *element.Type)
+		table.DefinitionLevels = columnData.definitionLevels
+		table.RepetitionLevels = columnData.repetitionLevels
 
-		tableMap[schema.Name] = table
-	}
-
-	pagesMap := make(map[string][]*page)
-	for name, table := range tableMap {
+		var pages []*page
 		if table.Encoding == parquet.Encoding_PLAIN_DICTIONARY {
 			if _, ok := writer.dictRecs[name]; !ok {
 				writer.dictRecs[name] = newDictRec(table.Type)
 			}
-			pagesMap[name], _ = tableToDictDataPages(writer.dictRecs[name], table, int32(writer.PageSize), 32, writer.CompressionType)
+			pages, _ = tableToDictDataPages(writer.dictRecs[name], table, int32(writer.PageSize), 32, writer.CompressionType)
 		} else {
-			pagesMap[name], _ = tableToDataPages(table, int32(writer.PageSize), writer.CompressionType)
-		}
-	}
-
-	recordsSize := int64(0)
-	for name, pages := range pagesMap {
-		if _, ok := writer.pagesMapBuf[name]; !ok {
-			writer.pagesMapBuf[name] = pages
-		} else {
-			writer.pagesMapBuf[name] = append(writer.pagesMapBuf[name], pages...)
-		}
-		for _, page := range pages {
-			recordsSize += int64(len(page.RawData))
-			writer.size += int64(len(page.RawData))
-			// As we got raw data, we don't need data table here after
-			// page.DataTable = nil
-		}
-	}
-
-	writer.numRows += int64(len(writer.records))
-
-	// if len(writer.pagesMapBuf) > 0 && writer.size+recordsSize >= writer.RowGroupSize {
-	if len(writer.pagesMapBuf) > 0 {
-		//pages -> chunk
-		chunkMap := make(map[string]*columnChunk)
-		for name, pages := range writer.pagesMapBuf {
-			// FIXME: add page encoding support.
-			// if len(pages) > 0 && pages[0].Info.Encoding == parquet.Encoding_PLAIN_DICTIONARY {
-			// 	dictPage, _ := dictoRecToDictPage(writer.dictRecs[name], int32(writer.PageSize), writer.CompressionType)
-			// 	tmp := append([]*page{dictPage}, pages...)
-			// 	chunkMap[name] = pagesToDictColumnChunk(tmp)
-			// } else {
-			// 	chunkMap[name] = pagesToColumnChunk(pages)
-			// }
-
-			chunkMap[name] = pagesToColumnChunk(pages)
+			pages, _ = tableToDataPages(table, int32(writer.PageSize), writer.CompressionType)
 		}
 
 		writer.dictRecs = make(map[string]*dictRec)
 
-		//chunks -> rowGroup
-		rowGroup := newRowGroup()
-		rowGroup.RowGroupHeader.Columns = []*parquet.ColumnChunk{}
+		// FIXME: add page encoding support.
+		// if len(pages) > 0 && pages[0].Info.Encoding == parquet.Encoding_PLAIN_DICTIONARY {
+		// 	dictPage, _ := dictoRecToDictPage(writer.dictRecs[name], int32(writer.PageSize), writer.CompressionType)
+		// 	tmp := append([]*page{dictPage}, pages...)
+		// 	chunk = pagesToDictColumnChunk(tmp)
+		// } else {
+		// 	chunk = pagesToColumnChunk(pages)
+		// }
+		chunk := pagesToColumnChunk(pages)
 
-		for k := 0; k < len(writer.schemaElements); k++ {
-			//for _, chunk := range chunkMap {
-			schema := writer.schemaElements[k]
-			if schema.GetNumChildren() > 0 {
-				continue
-			}
-			chunk := chunkMap[schema.Name]
-			if chunk == nil {
-				continue
-			}
-			rowGroup.Chunks = append(rowGroup.Chunks, chunk)
-			rowGroup.RowGroupHeader.TotalByteSize += chunk.chunkHeader.MetaData.TotalCompressedSize
-			rowGroup.RowGroupHeader.Columns = append(rowGroup.RowGroupHeader.Columns, chunk.chunkHeader)
-		}
-		rowGroup.RowGroupHeader.NumRows = writer.numRows
-		writer.numRows = 0
-
-		for k := 0; k < len(rowGroup.Chunks); k++ {
-			rowGroup.Chunks[k].chunkHeader.MetaData.DataPageOffset = -1
-			rowGroup.Chunks[k].chunkHeader.FileOffset = writer.offset
-
-			for l := 0; l < len(rowGroup.Chunks[k].Pages); l++ {
-				switch {
-				case rowGroup.Chunks[k].Pages[l].Header.Type == parquet.PageType_DICTIONARY_PAGE:
-					offset := writer.offset
-					rowGroup.Chunks[k].chunkHeader.MetaData.DictionaryPageOffset = &offset
-				case rowGroup.Chunks[k].chunkHeader.MetaData.DataPageOffset <= 0:
-					rowGroup.Chunks[k].chunkHeader.MetaData.DataPageOffset = writer.offset
-				}
-
-				data := rowGroup.Chunks[k].Pages[l].RawData
-				if _, err = writer.writeCloser.Write(data); err != nil {
-					return err
-				}
-
-				writer.offset += int64(len(data))
-			}
-		}
-
-		writer.footer.RowGroups = append(writer.footer.RowGroups, rowGroup.RowGroupHeader)
-		writer.size = 0
-		writer.pagesMapBuf = make(map[string][]*page)
+		rowGroup.Chunks = append(rowGroup.Chunks, chunk)
+		rowGroup.RowGroupHeader.TotalByteSize += chunk.chunkHeader.MetaData.TotalCompressedSize
+		rowGroup.RowGroupHeader.Columns = append(rowGroup.RowGroupHeader.Columns, chunk.chunkHeader)
 	}
 
-	writer.footer.NumRows += int64(len(writer.records))
-	writer.records = writer.records[:0]
+	rowGroup.RowGroupHeader.NumRows = writer.numRows
+
+	for i := 0; i < len(rowGroup.Chunks); i++ {
+		rowGroup.Chunks[i].chunkHeader.MetaData.DataPageOffset = -1
+		rowGroup.Chunks[i].chunkHeader.FileOffset = writer.offset
+
+		for j := 0; j < len(rowGroup.Chunks[i].Pages); j++ {
+			switch {
+			case rowGroup.Chunks[i].Pages[j].Header.Type == parquet.PageType_DICTIONARY_PAGE:
+				offset := writer.offset
+				rowGroup.Chunks[i].chunkHeader.MetaData.DictionaryPageOffset = &offset
+			case rowGroup.Chunks[i].chunkHeader.MetaData.DataPageOffset <= 0:
+				rowGroup.Chunks[i].chunkHeader.MetaData.DataPageOffset = writer.offset
+			}
+
+			data := rowGroup.Chunks[i].Pages[j].RawData
+			if _, err = writer.writeCloser.Write(data); err != nil {
+				return err
+			}
+
+			writer.offset += int64(len(data))
+		}
+	}
+
+	writer.footer.RowGroups = append(writer.footer.RowGroups, rowGroup.RowGroupHeader)
+	writer.footer.NumRows += writer.numRows
+
+	writer.numRows = 0
+	writer.columnDataMap = nil
 
 	return nil
 }
 
-// Write - writes a single record. The actual binary data write happens once rowGroupCount records are cached.
-func (writer *Writer) Write(record map[string]*Value) (err error) {
-	writer.records = append(writer.records, record)
-	if len(writer.records) != writer.rowGroupCount {
-		return nil
+func (writer *Writer) Write(record map[string]*ColumnData) (err error) {
+	if writer.columnDataMap == nil {
+		writer.columnDataMap = record
+	} else {
+		for name, columnData := range record {
+			var found bool
+			var element *schema.Element
+			for _, element = range writer.valueElements {
+				if element.PathInTree == name {
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				return fmt.Errorf("%v is not value column", name)
+			}
+
+			writer.columnDataMap[name].merge(columnData, *element.Type)
+		}
 	}
 
-	return writer.writeRecords()
+	writer.numRows++
+	if writer.numRows == int64(writer.rowGroupCount) {
+		return writer.writeData()
+	}
+
+	return nil
 }
 
 func (writer *Writer) finalize() (err error) {
-	if err = writer.writeRecords(); err != nil {
+	if err = writer.writeData(); err != nil {
 		return err
 	}
 
@@ -248,32 +206,31 @@ func (writer *Writer) Close() (err error) {
 }
 
 // NewWriter - creates new parquet writer. Binary data of rowGroupCount records are written to writeCloser.
-func NewWriter(writeCloser io.WriteCloser, schemaElements []*parquet.SchemaElement, rowGroupCount int) (*Writer, error) {
+func NewWriter(writeCloser io.WriteCloser, schemaTree *schema.Tree, rowGroupCount int) (*Writer, error) {
 	if _, err := writeCloser.Write([]byte("PAR1")); err != nil {
+		return nil, err
+	}
+
+	schemaList, valueElements, err := schemaTree.ToParquetSchema()
+	if err != nil {
 		return nil, err
 	}
 
 	footer := parquet.NewFileMetaData()
 	footer.Version = 1
-	numChildren := int32(len(schemaElements))
-	footer.Schema = append(footer.Schema, &parquet.SchemaElement{
-		Name:           "schema",
-		RepetitionType: parquet.FieldRepetitionTypePtr(parquet.FieldRepetitionType_REQUIRED),
-		NumChildren:    &numChildren,
-	})
-	footer.Schema = append(footer.Schema, schemaElements...)
+	footer.Schema = schemaList
 
 	return &Writer{
 		PageSize:        defaultPageSize,
 		RowGroupSize:    defaultRowGroupSize,
 		CompressionType: parquet.CompressionCodec_SNAPPY,
 
-		writeCloser:    writeCloser,
-		offset:         4,
-		pagesMapBuf:    make(map[string][]*page),
-		dictRecs:       make(map[string]*dictRec),
-		footer:         footer,
-		schemaElements: schemaElements,
-		rowGroupCount:  rowGroupCount,
+		writeCloser:   writeCloser,
+		offset:        4,
+		dictRecs:      make(map[string]*dictRec),
+		footer:        footer,
+		schemaTree:    schemaTree,
+		valueElements: valueElements,
+		rowGroupCount: rowGroupCount,
 	}, nil
 }
