@@ -54,7 +54,7 @@ func readBitPacked(reader *bytes.Reader, header, bitWidth uint64) (result []int6
 	valNeedBits := bitWidth
 	i := -1
 	for {
-		if left <= 0 {
+		if left == 0 {
 			i++
 			if i >= len(data) {
 				break
@@ -277,7 +277,7 @@ func readRLE(reader *bytes.Reader, header, bitWidth uint64) (result []int64, err
 }
 
 func readRLEBitPackedHybrid(reader *bytes.Reader, length, bitWidth uint64) (result []int64, err error) {
-	if length <= 0 {
+	if length == 0 {
 		var i32s []int32
 		i32s, err = readInt32s(reader, 1)
 		if err != nil {

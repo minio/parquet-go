@@ -119,76 +119,10 @@ func sizeOf(value interface{}) (size int32) {
 	return size
 }
 
-func lessThanBytes(a, b []byte, littleEndianOrder, signed bool) bool {
-	alen, blen := len(a), len(b)
-
-	if littleEndianOrder {
-		// Reverse a
-		for i, j := 0, len(a)-1; i < j; i, j = i+1, j-1 {
-			a[i], a[j] = a[j], a[i]
-		}
-
-		// Reverse b
-		for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
-			b[i], b[j] = b[j], b[i]
-		}
-	}
-
-	// Make a and b are equal sized array.
-	if alen < blen {
-		preBytes := make([]byte, blen-alen)
-		if signed && a[0]&0x80 == 0x80 {
-			for i := range preBytes {
-				preBytes[i] = 0xFF
-			}
-		}
-
-		a = append(preBytes, a...)
-	}
-
-	if alen > blen {
-		preBytes := make([]byte, alen-blen)
-		if signed && b[0]&0x80 == 0x80 {
-			for i := range preBytes {
-				preBytes[i] = 0xFF
-			}
-		}
-
-		b = append(preBytes, b...)
-	}
-
-	if signed {
-		// If ((BYTE & 0x80) = 0x80) means, BYTE is negative.  Hence negative logic is used.
-		if a[0]&0x80 > b[0]&0x80 {
-			return true
-		}
-
-		if a[0]&0x80 < b[0]&0x80 {
-			return false
-		}
-	}
-
-	for i := 0; i < len(a); i++ {
-		if a[i] < b[i] {
-			return true
-		}
-
-		if a[i] > b[i] {
-			return false
-		}
-	}
-
-	return false
-}
-
 // lessThan - returns whether a is less than b.
 func lessThan(a, b interface{}, dataType *parquet.Type, convertedType *parquet.ConvertedType) bool {
 	if a == nil {
-		if b == nil {
-			return false
-		}
-
-		return true
+		return b != nil
 	}
 
 	if b == nil {

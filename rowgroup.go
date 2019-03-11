@@ -17,8 +17,6 @@
 package parquet
 
 import (
-	"strings"
-
 	"github.com/minio/parquet-go/gen-go/parquet"
 )
 
@@ -31,24 +29,4 @@ func newRowGroup() *rowGroup {
 	return &rowGroup{
 		RowGroupHeader: parquet.NewRowGroup(),
 	}
-}
-
-func (rg *rowGroup) rowGroupToTableMap() map[string]*table {
-	tableMap := make(map[string]*table)
-	for _, chunk := range rg.Chunks {
-		columnPath := ""
-		for _, page := range chunk.Pages {
-			if columnPath == "" {
-				columnPath = strings.Join(page.DataTable.Path, ".")
-			}
-
-			if _, ok := tableMap[columnPath]; !ok {
-				tableMap[columnPath] = newTableFromTable(page.DataTable)
-			}
-
-			tableMap[columnPath].Merge(page.DataTable)
-		}
-	}
-
-	return tableMap
 }

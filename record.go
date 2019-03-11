@@ -17,8 +17,12 @@
 package parquet
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/bcicen/jstream"
+	parquetgen "github.com/minio/parquet-go/gen-go/parquet"
 )
 
 // Record - ordered parquet record.
@@ -36,6 +40,40 @@ func (r *Record) String() string {
 	})
 
 	return "map[" + strings.Join(values, " ") + "]"
+}
+
+// MarshalJSON - marshal record as json.
+func (r *Record) MarshalJSON() ([]byte, error) {
+	kvs := jstream.KVS{}
+	f := func(name string, v Value) bool {
+		if v.Value == nil {
+			kvs = append(kvs, jstream.KV{Key: name, Value: nil})
+			return true
+		}
+
+		var value interface{}
+		switch v.Type {
+		case parquetgen.Type_BOOLEAN:
+			value = v.Value.(bool)
+		case parquetgen.Type_INT32:
+			value = int64(v.Value.(int32))
+		case parquetgen.Type_INT64:
+			value = int64(v.Value.(int64))
+		case parquetgen.Type_FLOAT:
+			value = float64(v.Value.(float32))
+		case parquetgen.Type_DOUBLE:
+			value = v.Value.(float64)
+		case parquetgen.Type_INT96, parquetgen.Type_BYTE_ARRAY, parquetgen.Type_FIXED_LEN_BYTE_ARRAY:
+			value = string(v.Value.([]byte))
+		default:
+			return false
+		}
+
+		kvs = append(kvs, jstream.KV{Key: name, Value: value})
+		return true
+	}
+	r.Range(f)
+	return json.Marshal(kvs)
 }
 
 func (r *Record) set(name string, value Value) {
