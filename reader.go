@@ -155,10 +155,6 @@ func (reader *Reader) Read() (record *Record, err error) {
 
 // Close - closes underneath readers.
 func (reader *Reader) Close() (err error) {
-	if reader.columns != nil {
-		return nil
-	}
-
 	for _, column := range reader.columns {
 		column.close()
 	}
