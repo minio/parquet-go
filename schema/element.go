@@ -43,13 +43,13 @@ type Element struct {
 	Encoding           *parquet.Encoding         // Optional; defaults is computed.
 	CompressionType    *parquet.CompressionCodec // Optional; defaults to SNAPPY.
 	Children           *Tree
-	MaxDefinitionLevel int
-	MaxRepetitionLevel int
-	IndexInSchema      int // Index of this element in []*parquet.SchemaElement
+	MaxDefinitionLevel int64
+	MaxRepetitionLevel int64
 	PathInTree         string
 	PathInSchema       string
 }
 
+// String - stringify this element.
 func (element *Element) String() string {
 	var s []string
 	s = append(s, "Name:"+element.Name)
@@ -95,6 +95,10 @@ func NewElement(name string, repetitionType parquet.FieldRepetitionType,
 	case parquet.FieldRepetitionType_REQUIRED, parquet.FieldRepetitionType_OPTIONAL, parquet.FieldRepetitionType_REPEATED:
 	default:
 		return nil, fmt.Errorf("unknown repetition type %v", repetitionType)
+	}
+
+	if repetitionType == parquet.FieldRepetitionType_REPEATED && (elementType != nil || convertedType != nil) {
+		return nil, fmt.Errorf("repetition type REPEATED should be used in group element")
 	}
 
 	if children != nil && children.Length() != 0 {

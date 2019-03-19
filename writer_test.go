@@ -20,11 +20,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/minio/parquet-go/data"
 	"github.com/minio/parquet-go/gen-go/parquet"
 	"github.com/minio/parquet-go/schema"
 )
 
-func TestWriter(t *testing.T) {
+func TestWriterWrite(t *testing.T) {
 	schemaTree := schema.NewTree()
 	{
 		one, err := schema.NewElement("one", parquet.FieldRepetitionType_REQUIRED,
@@ -68,25 +69,78 @@ func TestWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	record := map[string]*ColumnData{
-		"one": &ColumnData{
-			values:           []int32{100},
-			definitionLevels: []int32{0},
-			repetitionLevels: []int32{0},
-		},
-		"two": &ColumnData{
-			values:           [][]byte{[]byte("foo")},
-			definitionLevels: []int32{0},
-			repetitionLevels: []int32{0},
-		},
-		"three": &ColumnData{
-			values:           []bool{true},
-			definitionLevels: []int32{0},
-			repetitionLevels: []int32{0},
-		},
+	oneColumn := data.NewColumn(parquet.Type_INT32)
+	oneColumn.AddInt32(100, 0, 0)
+
+	twoColumn := data.NewColumn(parquet.Type_BYTE_ARRAY)
+	twoColumn.AddByteArray([]byte("foo"), 0, 0)
+
+	threeColumn := data.NewColumn(parquet.Type_BOOLEAN)
+	threeColumn.AddBoolean(true, 0, 0)
+
+	record := map[string]*data.Column{
+		"one":   oneColumn,
+		"two":   twoColumn,
+		"three": threeColumn,
 	}
 
 	err = writer.Write(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = writer.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWriterWriteJSON(t *testing.T) {
+	schemaTree := schema.NewTree()
+	{
+		one, err := schema.NewElement("one", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_16),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		two, err := schema.NewElement("two", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_UTF8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		three, err := schema.NewElement("three", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_BOOLEAN), nil, nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := schemaTree.Set("one", one); err != nil {
+			t.Fatal(err)
+		}
+		if err := schemaTree.Set("two", two); err != nil {
+			t.Fatal(err)
+		}
+		if err := schemaTree.Set("three", three); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	file, err := os.Create("test.parquet")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writer, err := NewWriter(file, schemaTree, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	record := `{"one": 100, "two": "foo", "three": true}`
+	err = writer.WriteJSON([]byte(record))
 	if err != nil {
 		t.Fatal(err)
 	}

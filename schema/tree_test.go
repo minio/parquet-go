@@ -17,7 +17,6 @@
 package schema
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/minio/parquet-go/gen-go/parquet"
@@ -177,6 +176,55 @@ func TestTreeToParquetSchema(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		if err := case1Root.Set("A", a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case2Root := NewTree()
+	{
+		a, err := NewElement("a", parquet.FieldRepetitionType_OPTIONAL, nil, parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8), nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case2Root.Set("A", a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case3Root := NewTree()
+	{
+		a, err := NewElement("a", parquet.FieldRepetitionType_OPTIONAL, nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP_KEY_VALUE), nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case3Root.Set("A", a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case4Root := NewTree()
+	{
+		a, err := NewElement("a", parquet.FieldRepetitionType_OPTIONAL,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := case4Root.Set("A", a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case5Root := NewTree()
+	{
+		a, err := NewElement("a", parquet.FieldRepetitionType_OPTIONAL, nil, nil, nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 		b, err := NewElement("b", parquet.FieldRepetitionType_OPTIONAL, nil, nil, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -187,21 +235,61 @@ func TestTreeToParquetSchema(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := case1Root.Set("A", a); err != nil {
+		if err := case5Root.Set("A", a); err != nil {
 			t.Fatal(err)
 		}
-		if err := case1Root.Set("A.B", b); err != nil {
+		if err := case5Root.Set("A.B", b); err != nil {
 			t.Fatal(err)
 		}
-		if err := case1Root.Set("A.B.C", c); err != nil {
+		if err := case5Root.Set("A.B.C", c); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	testCases := []struct {
+		tree      *Tree
+		expectErr bool
+	}{
+		{case1Root, true}, // err: A: group element must have children
+		{case2Root, true}, // err: A: ConvertedType INT_8 must have Type value
+		{case3Root, true}, // err: A: unsupported ConvertedType MAP_KEY_VALUE
+		{case4Root, false},
+		{case5Root, false},
+	}
+
+	for i, testCase := range testCases {
+		_, _, err := testCase.tree.ToParquetSchema()
+		expectErr := (err != nil)
+
+		if expectErr != testCase.expectErr {
+			if testCase.expectErr {
+				t.Fatalf("case %v: err: expected: <error>, got: <nil>", i+1)
+			} else {
+				t.Fatalf("case %v: err: expected: <nil>, got: %v", i+1, err)
+			}
+		}
+	}
+}
+
+func TestTreeToParquetSchemaOfList(t *testing.T) {
+	case1Root := NewTree()
+	{
+		names, err := NewElement("names", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_LIST),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case1Root.Set("Names", names); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	case2Root := NewTree()
 	{
-		names, err := NewElement("names", parquet.FieldRepetitionType_OPTIONAL,
-			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_LIST),
+		names, err := NewElement("names", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -214,7 +302,16 @@ func TestTreeToParquetSchema(t *testing.T) {
 
 	case3Root := NewTree()
 	{
-		names, err := NewElement("names", parquet.FieldRepetitionType_OPTIONAL, nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST), nil, nil, nil)
+		names, err := NewElement("names", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		a, err := NewElement("a", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -222,24 +319,23 @@ func TestTreeToParquetSchema(t *testing.T) {
 		if err := case3Root.Set("Names", names); err != nil {
 			t.Fatal(err)
 		}
+
+		if err := case3Root.Set("Names.a", a); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	case4Root := NewTree()
 	{
-		names, err := NewElement("names", parquet.FieldRepetitionType_OPTIONAL, nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST), nil, nil, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		a, err := NewElement("a", parquet.FieldRepetitionType_OPTIONAL,
-			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_UTF8),
+		names, err := NewElement("names", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		b, err := NewElement("b", parquet.FieldRepetitionType_OPTIONAL,
-			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_UTF8),
+		list, err := NewElement("LIST", parquet.FieldRepetitionType_REQUIRED,
+			nil, nil,
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -248,23 +344,23 @@ func TestTreeToParquetSchema(t *testing.T) {
 		if err := case4Root.Set("Names", names); err != nil {
 			t.Fatal(err)
 		}
-		if err := case4Root.Set("Names.A", a); err != nil {
-			t.Fatal(err)
-		}
-		if err := case4Root.Set("Names.B", b); err != nil {
+
+		if err := case4Root.Set("Names.list", list); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	case5Root := NewTree()
 	{
-		names, err := NewElement("names", parquet.FieldRepetitionType_OPTIONAL, nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST), nil, nil, nil)
+		names, err := NewElement("names", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST),
+			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		a, err := NewElement("list", parquet.FieldRepetitionType_OPTIONAL,
-			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_UTF8),
+		list, err := NewElement("list", parquet.FieldRepetitionType_REQUIRED,
+			nil, nil,
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -273,20 +369,23 @@ func TestTreeToParquetSchema(t *testing.T) {
 		if err := case5Root.Set("Names", names); err != nil {
 			t.Fatal(err)
 		}
-		if err := case5Root.Set("Names.list", a); err != nil {
+
+		if err := case5Root.Set("Names.list", list); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	case6Root := NewTree()
 	{
-		names, err := NewElement("names", parquet.FieldRepetitionType_OPTIONAL, nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST), nil, nil, nil)
+		names, err := NewElement("names", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST),
+			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		a, err := NewElement("list", parquet.FieldRepetitionType_REPEATED,
-			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_UTF8),
+		list, err := NewElement("list", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -295,15 +394,358 @@ func TestTreeToParquetSchema(t *testing.T) {
 		if err := case6Root.Set("Names", names); err != nil {
 			t.Fatal(err)
 		}
-		if err := case6Root.Set("Names.list", a); err != nil {
+
+		if err := case6Root.Set("Names.list", list); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	case7Root := NewTree()
 	{
-		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_OPTIONAL,
+		names, err := NewElement("names", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		list, err := NewElement("list", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		a, err := NewElement("a", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case7Root.Set("Names", names); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case7Root.Set("Names.list", list); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case7Root.Set("Names.list.a", a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case8Root := NewTree()
+	{
+		names, err := NewElement("names", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		list, err := NewElement("list", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		element, err := NewElement("element", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		a, err := NewElement("a", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case8Root.Set("Names", names); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case8Root.Set("Names.list", list); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case8Root.Set("Names.list.element", element); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case8Root.Set("Names.list.a", a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case9Root := NewTree()
+	{
+		names, err := NewElement("names", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		list, err := NewElement("list", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		element, err := NewElement("ELEMENT", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case9Root.Set("Names", names); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case9Root.Set("Names.list", list); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case9Root.Set("Names.list.element", element); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case10Root := NewTree()
+	{
+		names, err := NewElement("names", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_LIST),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		list, err := NewElement("list", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		element, err := NewElement("element", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case10Root.Set("Names", names); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case10Root.Set("Names.list", list); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case10Root.Set("Names.list.element", element); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	testCases := []struct {
+		tree      *Tree
+		expectErr bool
+	}{
+		{case1Root, true}, // err: Names: type must be nil for LIST ConvertedType
+		{case2Root, true}, // err: Names: children must have one element only for LIST ConvertedType
+		{case3Root, true}, // err: Names: missing group element 'list' for LIST ConvertedType
+		{case4Root, true}, // err: Names.list: name must be 'list'
+		{case5Root, true}, // err: Names.list: repetition type must be REPEATED type
+		{case6Root, true}, // err: Names.list.element: not found
+		{case7Root, true}, // err: Names.list.element: not found
+		{case8Root, true}, // err: Names.list.element: not found
+		{case9Root, true}, // err: Names.list.element: name must be 'element'
+		{case10Root, false},
+	}
+
+	for i, testCase := range testCases {
+		_, _, err := testCase.tree.ToParquetSchema()
+		expectErr := (err != nil)
+
+		if expectErr != testCase.expectErr {
+			if testCase.expectErr {
+				t.Fatalf("case %v: err: expected: <error>, got: <nil>", i+1)
+			} else {
+				t.Fatalf("case %v: err: expected: <nil>, got: %v", i+1, err)
+			}
+		}
+	}
+}
+
+func TestTreeToParquetSchemaOfMap(t *testing.T) {
+	case1Root := NewTree()
+	{
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
 			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case1Root.Set("NameMap", nameMap); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case2Root := NewTree()
+	{
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case2Root.Set("NameMap", nameMap); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case3Root := NewTree()
+	{
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		a, err := NewElement("a", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case3Root.Set("NameMap", nameMap); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case3Root.Set("NameMap.a", a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case4Root := NewTree()
+	{
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		keyValue, err := NewElement("keyValue", parquet.FieldRepetitionType_REQUIRED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case4Root.Set("NameMap", nameMap); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case4Root.Set("NameMap.key_value", keyValue); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case5Root := NewTree()
+	{
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		keyValue, err := NewElement("key_value", parquet.FieldRepetitionType_REQUIRED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case5Root.Set("NameMap", nameMap); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case5Root.Set("NameMap.key_value", keyValue); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case6Root := NewTree()
+	{
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		keyValue, err := NewElement("key_value", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case6Root.Set("NameMap", nameMap); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case6Root.Set("NameMap.key_value", keyValue); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	case7Root := NewTree()
+	{
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		keyValue, err := NewElement("key_value", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		a, err := NewElement("a", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		b, err := NewElement("b", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		c, err := NewElement("c", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -312,12 +754,42 @@ func TestTreeToParquetSchema(t *testing.T) {
 		if err := case7Root.Set("NameMap", nameMap); err != nil {
 			t.Fatal(err)
 		}
+
+		if err := case7Root.Set("NameMap.key_value", keyValue); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case7Root.Set("NameMap.key_value.a", a); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case7Root.Set("NameMap.key_value.b", b); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case7Root.Set("NameMap.key_value.c", c); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	case8Root := NewTree()
 	{
-		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_OPTIONAL,
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
 			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		keyValue, err := NewElement("key_value", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		a, err := NewElement("a", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -326,12 +798,34 @@ func TestTreeToParquetSchema(t *testing.T) {
 		if err := case8Root.Set("NameMap", nameMap); err != nil {
 			t.Fatal(err)
 		}
+
+		if err := case8Root.Set("NameMap.key_value", keyValue); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case8Root.Set("NameMap.key_value.a", a); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	case9Root := NewTree()
 	{
-		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REPEATED,
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
 			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		keyValue, err := NewElement("key_value", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		key, err := NewElement("KEY", parquet.FieldRepetitionType_OPTIONAL,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -340,19 +834,34 @@ func TestTreeToParquetSchema(t *testing.T) {
 		if err := case9Root.Set("NameMap", nameMap); err != nil {
 			t.Fatal(err)
 		}
+
+		if err := case9Root.Set("NameMap.key_value", keyValue); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case9Root.Set("NameMap.key_value.key", key); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	case10Root := NewTree()
 	{
-		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REPEATED,
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
 			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		key, err := NewElement("key", parquet.FieldRepetitionType_REQUIRED,
-			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_UTF8),
+		keyValue, err := NewElement("key_value", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		key, err := NewElement("key", parquet.FieldRepetitionType_OPTIONAL,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -362,29 +871,40 @@ func TestTreeToParquetSchema(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := case10Root.Set("NameMap.key", key); err != nil {
+		if err := case10Root.Set("NameMap.key_value", keyValue); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case10Root.Set("NameMap.key_value.key", key); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	case11Root := NewTree()
 	{
-		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REPEATED,
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
 			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		key, err := NewElement("key", parquet.FieldRepetitionType_REQUIRED,
-			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_UTF8),
+		keyValue, err := NewElement("key_value", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		key2, err := NewElement("value", parquet.FieldRepetitionType_REQUIRED,
-			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_UTF8),
+		key, err := NewElement("key", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		a, err := NewElement("a", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -393,34 +913,45 @@ func TestTreeToParquetSchema(t *testing.T) {
 		if err := case11Root.Set("NameMap", nameMap); err != nil {
 			t.Fatal(err)
 		}
-		if err := case11Root.Set("NameMap.key", key); err != nil {
-			t.Fatal(err)
-		}
-		if err := case11Root.Set("NameMap.key2", key2); err != nil {
+
+		if err := case11Root.Set("NameMap.key_value", keyValue); err != nil {
 			t.Fatal(err)
 		}
 
-		fmt.Println(case11Root)
+		if err := case11Root.Set("NameMap.key_value.key", key); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case11Root.Set("NameMap.key_value.a", a); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	case12Root := NewTree()
 	{
-		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REPEATED,
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
 			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		key, err := NewElement("key", parquet.FieldRepetitionType_REQUIRED,
-			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_UTF8),
+		keyValue, err := NewElement("key_value", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		value, err := NewElement("value", parquet.FieldRepetitionType_REQUIRED,
-			parquet.TypePtr(parquet.Type_BYTE_ARRAY), parquet.ConvertedTypePtr(parquet.ConvertedType_UTF8),
+		key, err := NewElement("key", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		value, err := NewElement("VALUE", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -429,38 +960,99 @@ func TestTreeToParquetSchema(t *testing.T) {
 		if err := case12Root.Set("NameMap", nameMap); err != nil {
 			t.Fatal(err)
 		}
-		if err := case12Root.Set("NameMap.key", key); err != nil {
-			t.Fatal(err)
-		}
-		if err := case12Root.Set("NameMap.value", value); err != nil {
+
+		if err := case12Root.Set("NameMap.key_value", keyValue); err != nil {
 			t.Fatal(err)
 		}
 
-		fmt.Println(case12Root)
+		if err := case12Root.Set("NameMap.key_value.key", key); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case12Root.Set("NameMap.key_value.value", value); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	case13Root := NewTree()
 	{
-		a, err := NewElement("a", parquet.FieldRepetitionType_OPTIONAL,
-			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_UTF8),
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := case13Root.Set("A", a); err != nil {
+
+		keyValue, err := NewElement("key_value", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		key, err := NewElement("key", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case13Root.Set("NameMap", nameMap); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case13Root.Set("NameMap.key_value", keyValue); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case13Root.Set("NameMap.key_value.key", key); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	case14Root := NewTree()
 	{
-		a, err := NewElement("a", parquet.FieldRepetitionType_OPTIONAL,
+		nameMap, err := NewElement("nameMap", parquet.FieldRepetitionType_REQUIRED,
+			nil, parquet.ConvertedTypePtr(parquet.ConvertedType_MAP),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		keyValue, err := NewElement("key_value", parquet.FieldRepetitionType_REPEATED,
+			nil, nil,
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		key, err := NewElement("key", parquet.FieldRepetitionType_REQUIRED,
 			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
 			nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := case14Root.Set("A", a); err != nil {
+
+		value, err := NewElement("value", parquet.FieldRepetitionType_REQUIRED,
+			parquet.TypePtr(parquet.Type_INT32), parquet.ConvertedTypePtr(parquet.ConvertedType_INT_8),
+			nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case14Root.Set("NameMap", nameMap); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case14Root.Set("NameMap.key_value", keyValue); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case14Root.Set("NameMap.key_value.key", key); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := case13Root.Set("NameMap.key_value.value", value); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -469,19 +1061,19 @@ func TestTreeToParquetSchema(t *testing.T) {
 		tree      *Tree
 		expectErr bool
 	}{
-		{case1Root, false},
-		{case2Root, true}, // err: field Names of Type must be nil for LIST ConvertedType
-		{case3Root, true}, // err: field Names of Children must have one element for LIST ConvertedType
-		{case4Root, true}, // err: field Names of Children must have one element for LIST ConvertedType
-		{case5Root, true}, // err: repetition type of Names.list element must be REPEATED
-		{case6Root, false},
-		{case7Root, true},  // err: field Names of Type must be nil for MAP ConvertedType
-		{case8Root, true},  // err: repetition type of NameMap element must be REPEATED
-		{case9Root, true},  // err: field NameMap of Children must have only two elements for MAP ConvertedType
-		{case10Root, true}, // err: field NameMap of Children must have only two elements for MAP ConvertedType
-		{case11Root, true}, // err: field NameMap of Children must have 'value' element for MAP ConvertedType
-		{case12Root, false},
-		{case13Root, true}, // err: field A of ConvertedType UTF8 must have Type value
+		{case1Root, true},  // err: NameMap: type must be nil for MAP ConvertedType
+		{case2Root, true},  // err: NameMap: children must have one element only for MAP ConvertedType
+		{case3Root, true},  // err: NameMap: missing group element 'key_value' for MAP ConvertedType
+		{case4Root, true},  // err: NameMap.key_value: name must be 'key_value'
+		{case5Root, true},  // err: NameMap.key_value: repetition type must be REPEATED type
+		{case6Root, true},  // err: NameMap.key_value: children must have 'key' and optionally 'value' elements for MAP ConvertedType
+		{case7Root, true},  // err: NameMap.key_value: children must have 'key' and optionally 'value' elements for MAP ConvertedType
+		{case8Root, true},  // err: NameMap.key_value: missing 'key' element for MAP ConvertedType
+		{case9Root, true},  // err: NameMap.key_value.key: name must be 'key'
+		{case10Root, true}, // err: NameMap.key_value: repetition type must be REQUIRED type
+		{case11Root, true}, // err: NameMap.key_value: second element must be 'value' element for MAP ConvertedType
+		{case12Root, true}, // err: NameMap.key_value.value: name must be 'value'
+		{case13Root, false},
 		{case14Root, false},
 	}
 

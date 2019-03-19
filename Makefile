@@ -33,4 +33,4 @@ ineffassign:
 
 check: getdeps vet fmt lint cyclo spelling ineffassign
 	@echo "Running unit tests"
-	@go test -tags kqueue .
+	@go test -tags kqueue ./...
