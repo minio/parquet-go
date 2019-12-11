@@ -81,7 +81,7 @@ func main() {
 		columns = nil
 	}
 
-	file, err := parquet.Open(
+	file, err := parquet.NewReader(
 		func(offset, length int64) (io.ReadCloser, error) {
 			return getReader(name, offset, length)
 		},
@@ -119,9 +119,10 @@ func main() {
 
 		if !headerWritten {
 			var csvRecord []string
-			for columnName := range record {
-				csvRecord = append(csvRecord, columnName)
-			}
+			record.Range(func(name string, value parquet.Value) bool {
+				csvRecord = append(csvRecord, name)
+				return true
+			})
 
 			if err = csvWriter.Write(csvRecord); err != nil {
 				fmt.Printf("%v: %v\n", csvFilename, err)
@@ -132,9 +133,10 @@ func main() {
 		}
 
 		var csvRecord []string
-		for _, value := range record {
+		record.Range(func(name string, value parquet.Value) bool {
 			csvRecord = append(csvRecord, fmt.Sprintf("%v", value.Value))
-		}
+			return true
+		})
 
 		if err = csvWriter.Write(csvRecord); err != nil {
 			fmt.Printf("%v: %v\n", csvFilename, err)

@@ -18,16 +18,28 @@ package parquet
 
 import (
 	"bytes"
-	"compress/gzip"
 	"fmt"
-	"io/ioutil"
-
 	"github.com/golang/snappy"
+	"github.com/klauspost/compress/gzip"
+	"github.com/klauspost/compress/zstd"
 	"github.com/minio/parquet-go/gen-go/parquet"
 	"github.com/pierrec/lz4"
+	"io/ioutil"
+	"sync"
 )
 
 type compressionCodec parquet.CompressionCodec
+
+var zstdOnce sync.Once
+var zstdEnc *zstd.Encoder
+var zstdDec *zstd.Decoder
+
+func initZstd() {
+	zstdOnce.Do(func() {
+		zstdEnc, _ = zstd.NewWriter(nil, zstd.WithZeroFrames(true))
+		zstdDec, _ = zstd.NewReader(nil)
+	})
+}
 
 func (c compressionCodec) compress(buf []byte) ([]byte, error) {
 	switch parquet.CompressionCodec(c) {
@@ -78,6 +90,9 @@ func (c compressionCodec) compress(buf []byte) ([]byte, error) {
 		}
 
 		return byteBuf.Bytes(), nil
+	case parquet.CompressionCodec_ZSTD:
+		initZstd()
+		return zstdEnc.EncodeAll(buf, nil), nil
 	}
 
 	return nil, fmt.Errorf("invalid compression codec %v", c)
@@ -101,6 +116,10 @@ func (c compressionCodec) uncompress(buf []byte) ([]byte, error) {
 
 	case parquet.CompressionCodec_LZ4:
 		return ioutil.ReadAll(lz4.NewReader(bytes.NewReader(buf)))
+
+	case parquet.CompressionCodec_ZSTD:
+		initZstd()
+		return zstdDec.DecodeAll(buf, nil)
 	}
 
 	return nil, fmt.Errorf("invalid compression codec %v", c)
