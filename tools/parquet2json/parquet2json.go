@@ -81,7 +81,7 @@ func main() {
 		columns = nil
 	}
 
-	file, err := parquet.Open(
+	file, err := parquet.NewReader(
 		func(offset, length int64) (io.ReadCloser, error) {
 			return getReader(name, offset, length)
 		},
