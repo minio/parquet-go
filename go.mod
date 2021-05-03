@@ -1,6 +1,6 @@
 module github.com/minio/parquet-go
 
-go 1.14
+go 1.15
 
 require (
 	git.apache.org/thrift.git v0.13.0
