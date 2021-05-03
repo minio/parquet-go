@@ -17,11 +17,12 @@
 package parquet
 
 import (
+	"errors"
 	"io"
 	"strings"
 
 	"git.apache.org/thrift.git/lib/go/thrift"
-	"github.com/minio/minio-go/v6/pkg/set"
+	"github.com/minio/minio-go/v7/pkg/set"
 	"github.com/minio/parquet-go/gen-go/parquet"
 )
 
@@ -34,6 +35,9 @@ func getColumns(
 	nameIndexMap := make(map[string]int)
 	for colIndex, columnChunk := range rowGroup.GetColumns() {
 		meta := columnChunk.GetMetaData()
+		if meta == nil {
+			return nil, errors.New("parquet: column metadata missing")
+		}
 		columnName := strings.Join(meta.GetPathInSchema(), ".")
 		if columnNames != nil && !columnNames.Contains(columnName) {
 			continue
@@ -50,7 +54,9 @@ func getColumns(
 		}
 
 		size := meta.GetTotalCompressedSize()
-
+		if size < 0 {
+			return nil, errors.New("parquet: negative compressed size")
+		}
 		rc, err := getReaderFunc(offset, size)
 		if err != nil {
 			return nil, err
@@ -61,10 +67,18 @@ func getColumns(
 		if nameColumnMap == nil {
 			nameColumnMap = make(map[string]*column)
 		}
+		var se *parquet.SchemaElement
+		for _, schema := range schemaElements {
+			if schema != nil && schema.Name == columnName {
+				se = schema
+				break
+			}
+		}
 
 		nameColumnMap[columnName] = &column{
 			name:           columnName,
 			metadata:       meta,
+			schema:         se,
 			schemaElements: schemaElements,
 			rc:             rc,
 			thriftReader:   thriftReader,
@@ -89,6 +103,7 @@ type column struct {
 	valueIndex     int
 	valueType      parquet.Type
 	metadata       *parquet.ColumnMetaData
+	schema         *parquet.SchemaElement
 	schemaElements []*parquet.SchemaElement
 	nameIndexMap   map[string]int
 	dictPage       *page
@@ -134,14 +149,14 @@ func (column *column) readPage() {
 	column.dataTable.Merge(page.DataTable)
 }
 
-func (column *column) read() (value interface{}, valueType parquet.Type) {
+func (column *column) read() (value interface{}, valueType parquet.Type, cnv *parquet.SchemaElement) {
 	if column.dataTable == nil {
 		column.readPage()
 		column.valueIndex = 0
 	}
 
 	if column.endOfValues {
-		return nil, column.metadata.GetType()
+		return nil, column.metadata.GetType(), column.schema
 	}
 
 	value = column.dataTable.Values[column.valueIndex]
@@ -150,5 +165,5 @@ func (column *column) read() (value interface{}, valueType parquet.Type) {
 		column.dataTable = nil
 	}
 
-	return value, column.metadata.GetType()
+	return value, column.metadata.GetType(), column.schema
 }

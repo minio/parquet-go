@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/golang/snappy"
+	"github.com/klauspost/compress/s2"
 	"github.com/minio/parquet-go/gen-go/parquet"
 	"github.com/pierrec/lz4"
 )
 
+// ToSliceValue converts values to a slice value.
 func ToSliceValue(values []interface{}, parquetType parquet.Type) interface{} {
 	switch parquetType {
 	case parquet.Type_BOOLEAN:
@@ -54,7 +55,7 @@ func ToSliceValue(values []interface{}, parquetType parquet.Type) interface{} {
 	return nil
 }
 
-// BitWidth returns bits count required to accomodate given value.
+// BitWidth returns bits count required to accommodate given value.
 func BitWidth(ui64 uint64) (width int32) {
 	for ; ui64 != 0; ui64 >>= 1 {
 		width++
@@ -70,7 +71,7 @@ func Compress(compressionType parquet.CompressionCodec, data []byte) ([]byte, er
 		return data, nil
 
 	case parquet.CompressionCodec_SNAPPY:
-		return snappy.Encode(nil, data), nil
+		return s2.EncodeSnappy(nil, data), nil
 
 	case parquet.CompressionCodec_GZIP:
 		buf := new(bytes.Buffer)
@@ -125,7 +126,7 @@ func Uncompress(compressionType parquet.CompressionCodec, data []byte) ([]byte, 
 		return data, nil
 
 	case parquet.CompressionCodec_SNAPPY:
-		return snappy.Decode(nil, data)
+		return s2.Decode(nil, data)
 
 	case parquet.CompressionCodec_GZIP:
 		reader, err := gzip.NewReader(bytes.NewReader(data))

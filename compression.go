@@ -19,13 +19,14 @@ package parquet
 import (
 	"bytes"
 	"fmt"
-	"github.com/golang/snappy"
+	"io/ioutil"
+	"sync"
+
 	"github.com/klauspost/compress/gzip"
+	"github.com/klauspost/compress/s2"
 	"github.com/klauspost/compress/zstd"
 	"github.com/minio/parquet-go/gen-go/parquet"
 	"github.com/pierrec/lz4"
-	"io/ioutil"
-	"sync"
 )
 
 type compressionCodec parquet.CompressionCodec
@@ -47,7 +48,7 @@ func (c compressionCodec) compress(buf []byte) ([]byte, error) {
 		return buf, nil
 
 	case parquet.CompressionCodec_SNAPPY:
-		return snappy.Encode(nil, buf), nil
+		return s2.EncodeSnappy(nil, buf), nil
 
 	case parquet.CompressionCodec_GZIP:
 		byteBuf := new(bytes.Buffer)
@@ -104,7 +105,7 @@ func (c compressionCodec) uncompress(buf []byte) ([]byte, error) {
 		return buf, nil
 
 	case parquet.CompressionCodec_SNAPPY:
-		return snappy.Decode(nil, buf)
+		return s2.Decode(nil, buf)
 
 	case parquet.CompressionCodec_GZIP:
 		reader, err := gzip.NewReader(bytes.NewReader(buf))

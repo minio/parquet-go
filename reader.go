@@ -22,7 +22,7 @@ import (
 	"io"
 
 	"git.apache.org/thrift.git/lib/go/thrift"
-	"github.com/minio/minio-go/v6/pkg/set"
+	"github.com/minio/minio-go/v7/pkg/set"
 	"github.com/minio/parquet-go/gen-go/parquet"
 )
 
@@ -72,8 +72,9 @@ func fileMetadata(getReaderFunc GetReaderFunc) (*parquet.FileMetaData, error) {
 
 // Value - denotes column value
 type Value struct {
-	Value interface{}
-	Type  parquet.Type
+	Value  interface{}
+	Type   parquet.Type
+	Schema *parquet.SchemaElement
 }
 
 // MarshalJSON - encodes to JSON data
@@ -144,8 +145,9 @@ func (reader *Reader) Read() (record *Record, err error) {
 
 	record = newRecord(reader.nameList)
 	for name := range reader.columns {
-		value, valueType := reader.columns[name].read()
-		record.set(name, Value{value, valueType})
+		col := reader.columns[name]
+		value, valueType, schema := col.read()
+		record.set(name, Value{Value: value, Type: valueType, Schema: schema})
 	}
 
 	reader.rowIndex++
