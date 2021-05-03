@@ -19,7 +19,10 @@ package parquet
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"math"
 	"strings"
 
 	"git.apache.org/thrift.git/lib/go/thrift"
@@ -84,36 +87,6 @@ func readPageHeader(reader *thrift.TBufferedTransport) (*parquet.PageHeader, err
 	return pageHeader, nil
 }
 
-func readPageRawData(thriftReader *thrift.TBufferedTransport, metadata *parquet.ColumnMetaData) (page *page, err error) {
-	pageHeader, err := readPageHeader(thriftReader)
-	if err != nil {
-		return nil, err
-	}
-
-	switch pageType := pageHeader.GetType(); pageType {
-	case parquet.PageType_DICTIONARY_PAGE:
-		page = newDictPage()
-	case parquet.PageType_DATA_PAGE, parquet.PageType_DATA_PAGE_V2:
-		page = newDataPage()
-	default:
-		return nil, fmt.Errorf("unsupported page type %v", pageType)
-	}
-
-	compressedPageSize := pageHeader.GetCompressedPageSize()
-	buf := make([]byte, compressedPageSize)
-	if _, err := thriftReader.Read(buf); err != nil {
-		return nil, err
-	}
-
-	page.Header = pageHeader
-	page.CompressType = metadata.GetCodec()
-	page.RawData = buf
-	page.Path = append([]string{}, metadata.GetPathInSchema()...)
-	page.DataType = metadata.GetType()
-
-	return page, nil
-}
-
 func readPage(
 	thriftReader *thrift.TBufferedTransport,
 	metadata *parquet.ColumnMetaData,
@@ -131,22 +104,43 @@ func readPage(
 		var repLevelsBuf, defLevelsBuf []byte
 
 		if pageHeader.GetType() == parquet.PageType_DATA_PAGE_V2 {
+			if pageHeader.DataPageHeaderV2 == nil {
+				return nil, errors.New("parquet: Header not set")
+			}
 			repLevelsLen = pageHeader.DataPageHeaderV2.GetRepetitionLevelsByteLength()
 			repLevelsBuf = make([]byte, repLevelsLen)
-			if _, err = thriftReader.Read(repLevelsBuf); err != nil {
+
+			n, err := io.ReadFull(thriftReader, repLevelsBuf)
+			if err != nil {
 				return nil, err
+			}
+			if n != int(repLevelsLen) {
+				return nil, fmt.Errorf("expected parquet header repetition levels %d, got %d", repLevelsLen, n)
 			}
 
 			defLevelsLen = pageHeader.DataPageHeaderV2.GetDefinitionLevelsByteLength()
 			defLevelsBuf = make([]byte, defLevelsLen)
-			if _, err = thriftReader.Read(defLevelsBuf); err != nil {
+
+			n, err = io.ReadFull(thriftReader, defLevelsBuf)
+			if err != nil {
 				return nil, err
 			}
+			if n != int(defLevelsLen) {
+				return nil, fmt.Errorf("expected parquet header definition levels %d, got %d", defLevelsLen, n)
+			}
+		}
+		dbLen := pageHeader.GetCompressedPageSize() - repLevelsLen - defLevelsLen
+		if dbLen < 0 {
+			return nil, errors.New("parquet: negative data length")
 		}
 
-		dataBuf := make([]byte, pageHeader.GetCompressedPageSize()-repLevelsLen-defLevelsLen)
-		if _, err = thriftReader.Read(dataBuf); err != nil {
+		dataBuf := make([]byte, dbLen)
+		n, err := io.ReadFull(thriftReader, dataBuf)
+		if err != nil {
 			return nil, err
+		}
+		if n != int(dbLen) {
+			return nil, fmt.Errorf("expected parquet data buffer %d, got %d", dbLen, n)
 		}
 
 		if dataBuf, err = compressionCodec(metadata.GetCodec()).uncompress(dataBuf); err != nil {
@@ -176,7 +170,9 @@ func readPage(
 	if err != nil {
 		return nil, 0, 0, err
 	}
-
+	if metadata == nil {
+		return nil, 0, 0, errors.New("parquet: metadata not set")
+	}
 	path := append([]string{}, metadata.GetPathInSchema()...)
 
 	bytesReader := bytes.NewReader(buf)
@@ -190,6 +186,9 @@ func readPage(
 		page.Header = pageHeader
 		table := new(table)
 		table.Path = path
+		if pageHeader.DictionaryPageHeader == nil {
+			return nil, 0, 0, errors.New("parquet: dictionary not set")
+		}
 		values, err := readValues(bytesReader, metadata.GetType(),
 			uint64(pageHeader.DictionaryPageHeader.GetNumValues()), 0)
 		if err != nil {
@@ -213,9 +212,15 @@ func readPage(
 		var encodingType parquet.Encoding
 
 		if pageHeader.GetType() == parquet.PageType_DATA_PAGE {
+			if pageHeader.DataPageHeader == nil {
+				return nil, 0, 0, errors.New("parquet: Header not set")
+			}
 			numValues = uint64(pageHeader.DataPageHeader.GetNumValues())
 			encodingType = pageHeader.DataPageHeader.GetEncoding()
 		} else {
+			if pageHeader.DataPageHeaderV2 == nil {
+				return nil, 0, 0, errors.New("parquet: Header not set")
+			}
 			numValues = uint64(pageHeader.DataPageHeaderV2.GetNumValues())
 			encodingType = pageHeader.DataPageHeaderV2.GetEncoding()
 		}
@@ -228,10 +233,13 @@ func readPage(
 				return nil, 0, 0, err
 			}
 
-			if repetitionLevels = values.([]int64); uint64(len(repetitionLevels)) > numValues {
+			if repetitionLevels = values.([]int64); len(repetitionLevels) > int(numValues) && int(numValues) >= 0 {
 				repetitionLevels = repetitionLevels[:numValues]
 			}
 		} else {
+			if numValues > math.MaxInt64/8 {
+				return nil, 0, 0, errors.New("parquet: numvalues too large")
+			}
 			repetitionLevels = make([]int64, numValues)
 		}
 
@@ -242,10 +250,16 @@ func readPage(
 			if err != nil {
 				return nil, 0, 0, err
 			}
-			if definitionLevels = values.([]int64); uint64(len(definitionLevels)) > numValues {
+			if numValues > math.MaxInt64/8 {
+				return nil, 0, 0, errors.New("parquet: numvalues too large")
+			}
+			if definitionLevels = values.([]int64); len(definitionLevels) > int(numValues) {
 				definitionLevels = definitionLevels[:numValues]
 			}
 		} else {
+			if numValues > math.MaxInt64/8 {
+				return nil, 0, 0, errors.New("parquet: numvalues too large")
+			}
 			definitionLevels = make([]int64, numValues)
 		}
 
@@ -338,7 +352,10 @@ func (page *page) decode(dictPage *page) {
 
 	for i := 0; i < len(page.DataTable.Values); i++ {
 		if page.DataTable.Values[i] != nil {
-			index := page.DataTable.Values[i].(int64)
+			index, ok := page.DataTable.Values[i].(int64)
+			if !ok || int(index) >= len(dictPage.DataTable.Values) {
+				return
+			}
 			page.DataTable.Values[i] = dictPage.DataTable.Values[index]
 		}
 	}
@@ -354,7 +371,9 @@ func (page *page) getRLDLFromRawData(columnNameIndexMap map[string]int, schemaEl
 	if pageType == parquet.PageType_DATA_PAGE_V2 {
 		var repLevelsLen, defLevelsLen int32
 		var repLevelsBuf, defLevelsBuf []byte
-
+		if page.Header.DataPageHeaderV2 == nil {
+			return 0, 0, errors.New("parquet: Header not set")
+		}
 		repLevelsLen = page.Header.DataPageHeaderV2.GetRepetitionLevelsByteLength()
 		repLevelsBuf = make([]byte, repLevelsLen)
 		if _, err = bytesReader.Read(repLevelsBuf); err != nil {
@@ -405,8 +424,14 @@ func (page *page) getRLDLFromRawData(columnNameIndexMap map[string]int, schemaEl
 	case parquet.PageType_DATA_PAGE, parquet.PageType_DATA_PAGE_V2:
 		var numValues uint64
 		if pageType == parquet.PageType_DATA_PAGE {
+			if page.Header.DataPageHeader == nil {
+				return 0, 0, errors.New("parquet: Header not set")
+			}
 			numValues = uint64(page.Header.DataPageHeader.GetNumValues())
 		} else {
+			if page.Header.DataPageHeaderV2 == nil {
+				return 0, 0, errors.New("parquet: Header not set")
+			}
 			numValues = uint64(page.Header.DataPageHeaderV2.GetNumValues())
 		}
 
@@ -475,6 +500,9 @@ func (page *page) getValueFromRawData(columnNameIndexMap map[string]int, schemaE
 	case parquet.PageType_DICTIONARY_PAGE:
 		bytesReader := bytes.NewReader(page.RawData)
 		var values interface{}
+		if page.Header.DictionaryPageHeader == nil {
+			return errors.New("parquet: dictionary not set")
+		}
 		values, err = readValues(bytesReader, page.DataType,
 			uint64(page.Header.DictionaryPageHeader.GetNumValues()), 0)
 		if err != nil {
@@ -792,156 +820,4 @@ func (page *page) toDictDataPage(compressType parquet.CompressionCodec, bitWidth
 
 	page.RawData = append(pageHeaderBytes, compressedData...)
 	return page.RawData
-}
-
-func tableToDataPages(dataTable *table, pageSize int32, compressType parquet.CompressionCodec) (result []*page, totalSize int64) {
-	var j int
-	for i := 0; i < len(dataTable.Values); i = j {
-		var size, numValues int32
-		minVal := dataTable.Values[i]
-		maxVal := dataTable.Values[i]
-		for j = i + 1; j < len(dataTable.Values) && size < pageSize; j++ {
-			if dataTable.DefinitionLevels[j] == dataTable.MaxDefinitionLevel {
-				numValues++
-				size += sizeOf(dataTable.Values[j])
-				minVal = min(minVal, dataTable.Values[j], &dataTable.Type, &dataTable.ConvertedType)
-				maxVal = max(maxVal, dataTable.Values[j], &dataTable.Type, &dataTable.ConvertedType)
-			}
-		}
-
-		page := newDataPage()
-		page.PageSize = pageSize
-		page.Header.DataPageHeader.NumValues = numValues
-		page.Header.Type = parquet.PageType_DATA_PAGE
-
-		page.DataTable = new(table)
-		page.DataTable.RepetitionType = dataTable.RepetitionType
-		page.DataTable.Path = dataTable.Path
-		page.DataTable.MaxDefinitionLevel = dataTable.MaxDefinitionLevel
-		page.DataTable.MaxRepetitionLevel = dataTable.MaxRepetitionLevel
-		page.DataTable.Values = dataTable.Values[i:j]
-		page.DataTable.DefinitionLevels = dataTable.DefinitionLevels[i:j]
-		page.DataTable.RepetitionLevels = dataTable.RepetitionLevels[i:j]
-		page.DataTable.Type = dataTable.Type
-		page.DataTable.ConvertedType = dataTable.ConvertedType
-		page.DataTable.Encoding = dataTable.Encoding
-		page.MinVal = minVal
-		page.MaxVal = maxVal
-		page.DataType = dataTable.Type
-		page.CompressType = compressType
-		page.Path = dataTable.Path
-
-		page.toDataPage(compressType)
-
-		totalSize += int64(len(page.RawData))
-		result = append(result, page)
-	}
-
-	return result, totalSize
-}
-
-func tableToDictPage(dataTable *table, pageSize int32, compressType parquet.CompressionCodec) (*page, int64) {
-	dataType := dataTable.Type
-
-	page := newDataPage()
-	page.PageSize = pageSize
-	page.Header.DataPageHeader.NumValues = int32(len(dataTable.Values))
-	page.Header.Type = parquet.PageType_DICTIONARY_PAGE
-
-	page.DataTable = new(table)
-	page.DataTable.RepetitionType = dataTable.RepetitionType
-	page.DataTable.Path = dataTable.Path
-	page.DataTable.MaxDefinitionLevel = dataTable.MaxDefinitionLevel
-	page.DataTable.MaxRepetitionLevel = dataTable.MaxRepetitionLevel
-	page.DataTable.Values = dataTable.Values
-	page.DataTable.DefinitionLevels = dataTable.DefinitionLevels
-	page.DataTable.RepetitionLevels = dataTable.RepetitionLevels
-	page.DataType = dataType
-	page.CompressType = compressType
-	page.Path = dataTable.Path
-
-	page.toDictPage(compressType, dataTable.Type)
-	return page, int64(len(page.RawData))
-}
-
-type dictRec struct {
-	DictMap   map[interface{}]int32
-	DictSlice []interface{}
-	Type      parquet.Type
-}
-
-func newDictRec(dataType parquet.Type) *dictRec {
-	return &dictRec{
-		DictMap: make(map[interface{}]int32),
-		Type:    dataType,
-	}
-}
-
-func dictRecToDictPage(dictRec *dictRec, pageSize int32, compressType parquet.CompressionCodec) (*page, int64) {
-	page := newDataPage()
-	page.PageSize = pageSize
-	page.Header.DataPageHeader.NumValues = int32(len(dictRec.DictSlice))
-	page.Header.Type = parquet.PageType_DICTIONARY_PAGE
-
-	page.DataTable = new(table)
-	page.DataTable.Values = dictRec.DictSlice
-	page.DataType = parquet.Type_INT32
-	page.CompressType = compressType
-
-	page.toDictPage(compressType, dictRec.Type)
-	return page, int64(len(page.RawData))
-}
-
-func tableToDictDataPages(dictRec *dictRec, dataTable *table, pageSize int32, bitWidth int32, compressType parquet.CompressionCodec) (pages []*page, totalSize int64) {
-	dataType := dataTable.Type
-	pT, cT := dataTable.Type, dataTable.ConvertedType
-	j := 0
-	for i := 0; i < len(dataTable.Values); i = j {
-		j = i
-		var size, numValues int32
-		maxVal := dataTable.Values[i]
-		minVal := dataTable.Values[i]
-
-		values := make([]interface{}, 0)
-		for j < len(dataTable.Values) && size < pageSize {
-			if dataTable.DefinitionLevels[j] == dataTable.MaxDefinitionLevel {
-				numValues++
-				size += int32(sizeOf(dataTable.Values[j]))
-				maxVal = max(maxVal, dataTable.Values[j], &pT, &cT)
-				minVal = min(minVal, dataTable.Values[j], &pT, &cT)
-				if _, ok := dictRec.DictMap[dataTable.Values[j]]; !ok {
-					dictRec.DictSlice = append(dictRec.DictSlice, dataTable.Values[j])
-					dictRec.DictMap[dataTable.Values[j]] = int32(len(dictRec.DictSlice) - 1)
-				}
-				values = append(values, int32(dictRec.DictMap[dataTable.Values[j]]))
-			}
-			j++
-		}
-
-		page := newDataPage()
-		page.PageSize = pageSize
-		page.Header.DataPageHeader.NumValues = numValues
-		page.Header.Type = parquet.PageType_DATA_PAGE
-
-		page.DataTable = new(table)
-		page.DataTable.RepetitionType = dataTable.RepetitionType
-		page.DataTable.Path = dataTable.Path
-		page.DataTable.MaxDefinitionLevel = dataTable.MaxDefinitionLevel
-		page.DataTable.MaxRepetitionLevel = dataTable.MaxRepetitionLevel
-		page.DataTable.Values = values
-		page.DataTable.DefinitionLevels = dataTable.DefinitionLevels[i:j]
-		page.DataTable.RepetitionLevels = dataTable.RepetitionLevels[i:j]
-		page.MaxVal = maxVal
-		page.MinVal = minVal
-		page.DataType = dataType
-		page.CompressType = compressType
-		page.Path = dataTable.Path
-
-		page.toDictDataPage(compressType, bitWidth)
-
-		totalSize += int64(len(page.RawData))
-		pages = append(pages, page)
-	}
-
-	return pages, totalSize
 }
