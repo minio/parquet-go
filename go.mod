@@ -3,7 +3,7 @@ module github.com/minio/parquet-go
 go 1.15
 
 require (
-	git.apache.org/thrift.git v0.13.0
+	github.com/apache/thrift v0.15.0
 	github.com/frankban/quicktest v1.12.1 // indirect
 	github.com/klauspost/compress v1.12.2
 	github.com/minio/minio-go/v7 v7.0.10

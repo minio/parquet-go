@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"strings"
 
-	"git.apache.org/thrift.git/lib/go/thrift"
+	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/minio/parquet-go/common"
 	"github.com/minio/parquet-go/encoding"
 	"github.com/minio/parquet-go/gen-go/parquet"
